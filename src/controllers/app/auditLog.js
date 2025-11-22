@@ -13,7 +13,6 @@ module.exports = {
   createAuditLog: async (req, res) => {
     try {
       const auditData = req.body;
-      console.log(auditData, "AUDIT DATA");
 
       // Validate required fields
       if (!auditData.method || !auditData.endpoint || !auditData.responseStatus) {
