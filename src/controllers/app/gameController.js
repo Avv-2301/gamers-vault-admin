@@ -1,7 +1,7 @@
 const Product = require("../../models/Product");
 const Response = require("@avv-2301/gamers-vault-common");
 const Constant = require("@avv-2301/gamers-vault-common");
-const { createGameValidation, getGameByIdValidation } = require("../../services/Validation");
+const { createGameValidation, getGameByIdValidation, updateGameValidation } = require("../../services/Validation");
 const { generateSlug } = require("../../services/Helper");
 
 module.exports = {
@@ -183,6 +183,174 @@ module.exports = {
         Constant.STATUS_CODES.SUCCESS,
         "Games retrieved successfully"
       );
+    } catch (error) {
+      console.log(error);
+      return Response.errorResponseData(
+        res,
+        error.message || "Internal Server Error",
+        Constant.STATUS_CODES.INTERNAL_SERVER
+      );
+    }
+  },
+
+  /**
+   * @description This function is used to get a game by ID
+   * @param req
+   * @param res
+   */
+  getGameById: async (req, res) => {
+    try {
+      // Check admin role
+      const role = req.role || req.headers["x-user-role"];
+      if (role !== Constant.ROLE.ADMIN) {
+        return Response.errorResponseWithoutData(
+          res,
+          "Admin access required",
+          Constant.STATUS_CODES.FORBIDDEN
+        );
+      }
+
+      const gameId = req.params.id;
+
+      if (!gameId) {
+        return Response.errorResponseData(
+          res,
+          "Game ID is required",
+          Constant.STATUS_CODES.BAD_REQUEST
+        );
+      }
+
+      getGameByIdValidation(req, res, async (validate) => {
+        if (validate) {
+          const game = await Product.findById(gameId).select("-__v");
+
+          if (!game) {
+            return Response.errorResponseWithoutData(
+              res,
+              "Game not found",
+              Constant.STATUS_CODES.PAGE_NOT_FOUND
+            );
+          }
+
+          return Response.successResponseData(
+            res,
+            game,
+            Constant.STATUS_CODES.SUCCESS,
+            "Game retrieved successfully"
+          );
+        }
+      });
+    } catch (error) {
+      console.log(error);
+      return Response.errorResponseData(
+        res,
+        error.message || "Internal Server Error",
+        Constant.STATUS_CODES.INTERNAL_SERVER
+      );
+    }
+  },
+
+  /**
+   * @description This function is used to update a game
+   * @param req
+   * @param res
+   */
+  updateGame: async (req, res) => {
+    try {
+      // Check admin role
+      const role = req.role || req.headers["x-user-role"];
+      if (role !== Constant.ROLE.ADMIN) {
+        return Response.errorResponseWithoutData(
+          res,
+          "Admin access required",
+          Constant.STATUS_CODES.FORBIDDEN
+        );
+      }
+
+      const gameId = req.params.id;
+
+      if (!gameId) {
+        return Response.errorResponseData(
+          res,
+          "Game ID is required",
+          Constant.STATUS_CODES.BAD_REQUEST
+        );
+      }
+
+      // Validate game ID format
+      getGameByIdValidation(req, res, async (idValid) => {
+        if (idValid) {
+          // Validate update data
+          updateGameValidation(req.body, res, async (validate) => {
+            if (validate) {
+              // Check if game exists
+              const existingGame = await Product.findById(gameId);
+              if (!existingGame) {
+                return Response.errorResponseWithoutData(
+                  res,
+                  "Game not found",
+                  Constant.STATUS_CODES.PAGE_NOT_FOUND
+                );
+              }
+
+              const requestParams = req.body;
+              const updateData = { ...requestParams };
+
+              // Generate slug from name if name is being updated and slug is not provided
+              if (requestParams.name && !requestParams.slug) {
+                updateData.slug = generateSlug(requestParams.name);
+              } else if (requestParams.slug) {
+                updateData.slug = requestParams.slug.toLowerCase();
+              }
+
+              // Check if slug already exists (excluding current game)
+              if (updateData.slug) {
+                const slugExists = await Product.findOne({
+                  slug: updateData.slug,
+                  _id: { $ne: gameId },
+                });
+                if (slugExists) {
+                  return Response.errorResponseWithoutData(
+                    res,
+                    "Game with this slug already exists",
+                    Constant.STATUS_CODES.DATA_CONFLICT
+                  );
+                }
+              }
+
+              // Calculate discount percentage if discountPrice or price is being updated
+              if (requestParams.discountPrice !== undefined || requestParams.price !== undefined) {
+                const price = requestParams.price !== undefined ? requestParams.price : existingGame.price;
+                const discountPrice = requestParams.discountPrice !== undefined 
+                  ? requestParams.discountPrice 
+                  : existingGame.discountPrice;
+
+                if (discountPrice !== null && discountPrice !== undefined && price) {
+                  updateData.discountPercentage = Math.round(
+                    ((price - discountPrice) / price) * 100
+                  );
+                } else if (discountPrice === null || discountPrice === undefined) {
+                  updateData.discountPercentage = 0;
+                }
+              }
+
+              // Update the game
+              const updatedGame = await Product.findByIdAndUpdate(
+                gameId,
+                { $set: updateData },
+                { new: true, runValidators: true }
+              );
+
+              return Response.successResponseData(
+                res,
+                updatedGame,
+                Constant.STATUS_CODES.SUCCESS,
+                "Game updated successfully"
+              );
+            }
+          });
+        }
+      });
     } catch (error) {
       console.log(error);
       return Response.errorResponseData(
